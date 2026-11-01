@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>俄乌前线 OSINT 追踪器</title>
+<link rel="stylesheet" href="/static/vendor/leaflet.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <div id="map"></div>
+  <aside id="panel">
+    <header>
+      <h1>俄乌前线 OSINT 追踪器</h1>
+      <div class="sub">基于 DeepStateMap 公开快照 · ISW 每日评估 · 公开新闻</div>
+      <div class="row">
+        <button id="refreshBtn" title="立即从 DeepState、ISW、新闻源获取最新数据">⟳ 立即刷新</button>
+        <span id="refreshStatus" class="muted small"></span>
+      </div>
+      <div id="autoStatus" class="autostatus small">
+        <div>🕒 数据检查于 <b id="lastChecked">–</b>（巴黎时间）· 最近有新数据 <b id="lastNew">–</b></div>
+        <div>⏭ 下次自动更新 <b id="nextRun">–</b>
+          · 间隔 <select id="intervalSel" title="后台自动更新间隔（保存在本机）">
+            <option value="0">关闭</option><option value="15">15 分钟</option><option value="30">30 分钟</option>
+            <option value="60">60 分钟</option><option value="120">2 小时</option><option value="360">6 小时</option>
+          </select></div>
+      </div>
+    </header>
+
+    <section>
+      <h2>日期（欧洲/巴黎时间）</h2>
+      <div class="row">
+        <button id="prevDay">◀</button>
+        <input type="date" id="datePick">
+        <button id="nextDay">▶</button>
+        <button id="latestBtn">最新</button>
+      </div>
+      <input type="range" id="dateSlider" min="0" max="0" value="0">
+      <div id="snapInfo" class="muted small"></div>
+    </section>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="tabFront">🗺 前线</button>
+      <button class="tab" data-tab="tabAid">🤝 援助与政治</button>
+    </div>
+
+    <div id="tabFront">
+    <section>
+      <h2>对比基准</h2>
+      <div class="row">
+        <select id="compare">
+          <option value="prev" selected>上一次 DeepState 更新</option>
+          <option value="1">1 天前</option>
+          <option value="7">7 天前</option>
+          <option value="30">30 天前</option>
+          <option value="custom">自定义日期…</option>
+        </select>
+        <input type="date" id="fromPick" style="display:none">
+      </div>
+      <div id="compareInfo" class="muted small"></div>
+    </section>
+
+    <section>
+      <h2>面积统计</h2>
+      <div class="cards">
+        <div class="card"><div class="lbl">俄控面积</div><div id="sOcc" class="val">–</div></div>
+        <div class="card"><div class="lbl">灰色区</div><div id="sGrey" class="val">–</div></div>
+        <div class="card red"><div class="lbl">俄方新增</div><div id="sGain" class="val">–</div></div>
+        <div class="card blue"><div class="lbl">俄控减少</div><div id="sLoss" class="val">–</div></div>
+        <div class="card wide"><div class="lbl">净变化（正 = 俄控增加）</div><div id="sNet" class="val">–</div></div>
+      </div>
+      <div id="changesMsg" class="muted small"></div>
+    </section>
+
+    <section>
+      <h2>热点方向 <span class="muted small">（点击定位）</span></h2>
+      <ol id="sectors" class="list"></ol>
+    </section>
+
+    <section>
+      <h2>全面战争以来的变化（自 2022-02-24）</h2>
+      <div class="row small">范围：
+        <button class="rng" data-days="30">30 天</button><button class="rng" data-days="180">半年</button>
+        <button class="rng" data-days="365">1 年</button><button class="rng active" data-days="0">全部</button>
+      </div>
+      <canvas id="chart" height="230"></canvas>
+      <div class="muted small">橙线 = 2022-02-24 至 04-02 的 ISW/CTP 评估控制区（DeepState 公开历史从 2022-04-03 开始）；
+        红线 = DeepState 俄控面积；黑线 = 自 2022-02-24 起累计净变化（不含 04-03 的数据源切换跳变）。点击图表跳转日期。</div>
+    </section>
+
+    <section>
+      <h2>DeepState 更新说明 <span class="muted small">（对比区间内，原文）</span></h2>
+      <ul id="notes" class="list small"></ul>
+    </section>
+
+    <section>
+      <h2>ISW 每日评估要点 <span class="muted small">（英文原文）</span></h2>
+      <div id="isw" class="small"></div>
+    </section>
+
+    <section>
+      <h2>新闻标题</h2>
+      <ul id="news" class="list small"></ul>
+    </section>
+
+    <section>
+      <h2>数据源状态</h2>
+      <ul id="sources" class="list small"></ul>
+    </section>
+
+    </div><!-- /tabFront -->
+
+    <div id="tabAid" hidden>
+      <div id="aidMeta" class="aidmeta small"></div>
+      <section>
+        <h2>所选日期的时间窗口</h2>
+        <div class="row small">
+          <span id="aidDateLbl"></span>
+          <select id="aidWin">
+            <option value="0">仅当天</option><option value="1">±1 天</option><option value="3" selected>±3 天</option>
+            <option value="7">±7 天</option><option value="15">±15 天</option>
+          </select>
+        </div>
+        <div id="aidNote" class="warnbox small" hidden></div>
+      </section>
+
+      <section>
+        <h2>截至所选日期的累计援助 <span class="muted small">（Kiel：已分配 allocations，欧元现价）</span></h2>
+        <div class="cards">
+          <div class="card wide"><div class="lbl">累计已分配援助合计</div><div id="aTot" class="val">–</div></div>
+          <div class="card mil"><div class="lbl">军事</div><div id="aMil" class="val">–</div></div>
+          <div class="card fin"><div class="lbl">经济/金融</div><div id="aFin" class="val">–</div></div>
+          <div class="card hum"><div class="lbl">人道</div><div id="aHum" class="val">–</div></div>
+          <div class="card"><div class="lbl">条目（其中无金额）</div><div id="aCnt" class="val">–</div></div>
+        </div>
+        <div id="aCommit" class="muted small"></div>
+        <h2>主要援助方（截至所选日期，前 10）</h2>
+        <div id="aDonors" class="donors small"></div>
+      </section>
+
+      <section>
+        <h2>战争期间累计援助 <span class="muted small">（十亿欧元）</span></h2>
+        <label class="small"><input type="checkbox" id="aidOverlay" checked> 叠加俄控面积（前线时间线）</label>
+        <canvas id="aidChart" height="220"></canvas>
+        <div class="muted small">堆叠面积 = 按宣布日期累计的已分配援助（Kiel）；灰线 = 俄控面积（km²，右轴）；竖线 = 所选日期。点击图表跳转日期。</div>
+      </section>
+
+      <section>
+        <h2>援助条目 <span id="aidCount" class="muted small"></span></h2>
+        <div class="row small filters" id="aidFilt">
+          <label><input type="checkbox" value="military" checked> 军事</label>
+          <label><input type="checkbox" value="financial" checked> 经济/金融</label>
+          <label><input type="checkbox" value="humanitarian" checked> 人道</label>
+          <select id="aidMeasure"><option value="all">分配+承诺</option><option value="Allocation" selected>仅已分配</option><option value="Commitment">仅承诺</option></select>
+        </div>
+        <ul id="aidList" class="list aidlist small"></ul>
+      </section>
+
+      <section>
+        <h2>援助与政治新闻 <span id="newsCount" class="muted small"></span></h2>
+        <div class="row small" id="newsFilt">
+          <button class="nf active" data-c="">全部</button><button class="nf" data-c="military">军事</button>
+          <button class="nf" data-c="financial">经济/金融</button><button class="nf" data-c="humanitarian">人道</button>
+          <button class="nf" data-c="political">政治</button><button class="nf" data-c="other">其他</button>
+        </div>
+        <ul id="pnews" class="list small"></ul>
+        <div class="muted small">新闻来自 Google News RSS 按日期检索（关键词：Ukraine aid/weapons/loan/package/humanitarian/military；sanctions/talks/ceasefire/NATO/summit），
+          分类为基于标题关键词的<b>自动分类</b>，可能有误；标题保留原文。</div>
+      </section>
+    </div><!-- /tabAid -->
+
+    <section class="disclaimer small">
+      <b>免责声明：</b>本工具仅汇总公开来源（OSINT）：DeepStateMap 地图快照、ISW（经 criticalthreats.org 同步发布版）、公开新闻 RSS。
+      它<b>不是情报产品</b>，不做任何推测或模拟。DeepState 地图通常滞后实际战况 1–3 天并会回溯修订；“俄方新增/俄控减少”仅表示地图多边形的变化，可能包含绘图修正。
+      面积以 EPSG:6933 等积投影计算。地名来自 GeoNames（最近居民点，仅供定位）。底图 © OpenStreetMap 贡献者 © CARTO。
+    </section>
+  </aside>
+</div>
+<div id="loading">加载中…</div>
+<div id="toast"></div>
+<script src="/static/vendor/leaflet.js"></script>
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script src="/static/app.js"></script>
+<script src="/static/aid.js"></script>
+</body>
+</html>

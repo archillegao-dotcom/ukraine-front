@@ -1,0 +1,10 @@
+.venv
+data/layers*
+data/diffs*
+data/aid_raw
+data/cache/polnews
+screenshots
+data/logs
+*.zip
+build
+dist

@@ -1,0 +1,44 @@
+# --- Python / virtualenvs / caches ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- PyInstaller build output ---
+build/
+dist/
+*.spec.bak
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- archives (release zips are built by CI, not committed) ---
+*.zip
+!data/static/*.zip
+
+# --- runtime data that is rebuilt or downloaded automatically ---
+data/snapshots/
+data/layers_v*/
+data/diffs_v*/
+data/aid_raw/
+data/logs/
+data/cache/polnews/
+data/cache/scheduler_state.json
+data/settings.json
+data/static/UA.txt
+server.json
+*.tmp
+*.seedtmp
+output/
+
+# --- screenshots: only the one used in README is committed ---
+screenshots/*
+!screenshots/02_compare_30d.png

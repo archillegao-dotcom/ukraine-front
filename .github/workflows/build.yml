@@ -1,0 +1,172 @@
+# Builds standalone apps (no Python needed on the user's machine) with PyInstaller.
+#  - push a tag like v1.0.0  -> builds + attaches zips to a GitHub Release
+#  - Actions tab > "Build apps" > Run workflow -> builds, zips downloadable as artifacts
+#
+# macOS (arm64 and Intel) is published as soon as those two jobs finish.
+# The Windows job runs in parallel and must not block that release; its zip is
+# attached afterwards, only if that job succeeds.
+name: Build apps
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest        # Apple Silicon (arm64). macos-latest is macOS 26.
+            name: macos-arm64
+          - os: macos-15-intel      # Intel Mac (x86_64). macos-13 was retired.
+            name: macos-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      UF_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.0.0' }}
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+      PYTHONUNBUFFERED: "1"
+      # Floor for anything pip compiles from source. Prebuilt wheels keep their own
+      # minimum; packaging/build.py reads the real one back out of the binaries.
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build (seed data + PyInstaller + zip)
+        run: python packaging/build.py --fetch
+
+      - name: Smoke test (unpacked ditto zip, --no-terminal)
+        shell: bash
+        run: bash packaging/smoke.sh
+
+      - name: Rename zip
+        shell: bash
+        run: |
+          ls -la dist
+          f=$(ls dist/UkraineFront-*.zip | head -n1)
+          dest="dist/UkraineFront-${{ matrix.name }}.zip"
+          if [ "$f" != "$dest" ]; then mv "$f" "$dest"; fi
+          test -f "$dest"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UkraineFront-${{ matrix.name }}
+          path: dist/UkraineFront-${{ matrix.name }}.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  build-windows:
+    name: build (windows-x64)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      UF_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.0.0' }}
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build (seed data + PyInstaller + zip)
+        run: python packaging/build.py --fetch
+
+      - name: Smoke test
+        shell: bash
+        run: bash packaging/smoke.sh
+
+      - name: Rename zip
+        shell: bash
+        run: |
+          ls -la dist
+          f=$(ls dist/UkraineFront-*.zip | head -n1)
+          dest="dist/UkraineFront-windows-x64.zip"
+          if [ "$f" != "$dest" ]; then mv "$f" "$dest"; fi
+          test -f "$dest"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UkraineFront-windows-x64
+          path: dist/UkraineFront-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  release-macos:
+    name: release (macOS)
+    needs: build-macos
+    if: ${{ !cancelled() && github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: UkraineFront-macos-*
+          path: out
+          merge-multiple: true
+
+      - name: Require both macOS zips and write notes
+        run: |
+          ls -la out
+          test -f out/UkraineFront-macos-arm64.zip
+          test -f out/UkraineFront-macos-x64.zip
+          python3 packaging/release_notes.py out > notes.md
+          cat notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: UkraineFront ${{ github.ref_name }}
+          body_path: notes.md
+          files: |
+            out/UkraineFront-macos-arm64.zip
+            out/UkraineFront-macos-x64.zip
+          fail_on_unmatched_files: true
+
+  release-windows:
+    name: release (Windows)
+    needs: [build-windows, release-macos]
+    if: ${{ !cancelled() && github.ref_type == 'tag' && needs.build-windows.result == 'success' && needs.release-macos.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: UkraineFront-*
+          path: out
+          merge-multiple: true
+
+      - name: Attach the Windows zip and refresh the notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -f out/UkraineFront-windows-x64.zip
+          gh release upload "${{ github.ref_name }}" out/UkraineFront-windows-x64.zip --clobber
+          python3 packaging/release_notes.py out > notes.md
+          gh release edit "${{ github.ref_name }}" --notes-file notes.md
